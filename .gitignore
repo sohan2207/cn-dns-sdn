@@ -20,3 +20,6 @@ htmlcov/
 # Local output/logs
 *.log
 results/
+
+# Generated test reports and logs
+reports/
