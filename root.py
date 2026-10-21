@@ -1,43 +1,47 @@
 import socket
 import struct
 
-sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
-
-sock.bind(('10.0.0.3',9053))
+ROOT_IP = "10.0.0.3"
+ROOT_PORT = 9053
 
 ex_dns_records = {
-    
-    "netflix.com" : '192.27.78.9',
-    "crunchyroll.com" : '89:78:12:0'
+    "netflix.com": "192.27.78.9",
+    "crunchyroll.com": "89.78.12.0",
+    # Fallback records if h1 fails during failover testing
+    "example.com": "93.184.216.34",
+    "google.com": "142.250.190.46",
+    "fedora.org": "8.43.85.67",
 }
 
-while True:
-    data,addr = sock.recvfrom(1024)
-    header = data[:12]
-    question = data[12:]
-    trans_id,flags,qn,an,ns,ar = struct.unpack('!HHHHHH',header)
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.bind((ROOT_IP, ROOT_PORT))
 
-    domain_requested = question.decode().strip()
+print(f"Secondary/Root DNS server listening on {ROOT_IP}:{ROOT_PORT}.....", flush=True)
+
+while True:
+    try:
+        data, addr = sock.recvfrom(1024)
+    except Exception:
+        continue
+
+    # Support ping check if needed
+    if data == b"ping":
+        sock.sendto(b"pong", addr)
+        continue
+
+    if len(data) < 12:
+        continue
+
+    header = data[:12]
+    payload = data[12:]
+    trans_id, flags, qd, an, ns, ar = struct.unpack("!HHHHHH", header)
+    domain_requested = payload.decode(errors="ignore").strip()
+
     if domain_requested in ex_dns_records:
         ip_answer = ex_dns_records[domain_requested]
-        resp_header = struct.pack('!HHHHHH',trans_id,0x8180,1,1,0,0)
-        final_packet = resp_header+ip_answer.encode()
-        sock.sendto(final_packet,addr)
+        resp_header = struct.pack("!HHHHHH", trans_id, 0x8180, 1, 1, 0, 0)
+        sock.sendto(resp_header + ip_answer.encode(), addr)
     else:
-        print(f"Sorry, unable to find {domain_requested}")
-
-    
-    
-
-
-
-"""• Implement UDP name-resolution queries
-• Maintain name-to-IP mappings
-• Support multiple resolution servers
-• Implement caching
-• Handle timeouts
-• Detect server failures
-• Redirect requests when required
-• Measure lookup latency"
-"""
-
+        # NXDOMAIN: Name does not exist (0x8183)
+        resp_header = struct.pack("!HHHHHH", trans_id, 0x8183, 1, 0, 0, 0)
+        sock.sendto(resp_header + b"NXDOMAIN: Domain not found", addr)
